@@ -11,16 +11,34 @@ public class ActuadorRele {
 	private Integer idGroup;
 	private Integer idDB;
 	
-	public ActuadorRele(Integer idRele, Boolean estado, Integer idPlaca, Integer idGroup,
+	public ActuadorRele(Integer idRele, Integer estado, Integer idPlaca, Integer idGroup,
 			Integer idDB) {
 		super();
 		this.idRele = idRele;
-		this.estado = estado;
+		
+		if(estado==0)this.estado=false;
+		else if(estado==1)this.estado=true;
+		else this.estado = null;
+		
 		this.timestamp = System.currentTimeMillis();
 		this.idPlaca = idPlaca;
 		this.idGroup = idGroup;
 		this.idDB = idDB;
-	}
+	}/*
+	public ActuadorRele(String idRele, String estado, String idPlaca, String idGroup,
+			String idDB) {
+		super();
+		this.idRele = Integer.valueOf(idRele);
+		
+		if(estado=="false")this.estado=false;
+		else if(estado=="true")this.estado=true;
+		else this.estado = null;
+		
+		this.timestamp = System.currentTimeMillis();
+		this.idPlaca = Integer.valueOf(idPlaca);
+		this.idGroup = Integer.valueOf(idGroup);
+		this.idDB = Integer.valueOf(idDB);
+	}*/
 
 	public Integer getIdRele() {
 		return idRele;
