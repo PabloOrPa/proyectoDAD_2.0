@@ -34,7 +34,7 @@ public class RestServer extends AbstractVerticle {
 	
 	public void start(Promise<Void> startFuture) {
 		// Datos de ejemplo
-		 createSomeData(25);
+		 createSomeData(10);
 		
 		// Instanciamos Gson
 		gson = new GsonBuilder().setDateFormat("dd-MM-yyyy").create();
@@ -188,8 +188,7 @@ public class RestServer extends AbstractVerticle {
 		}
 		
 	}
-	
-	
+
 	
 	
 	

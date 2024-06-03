@@ -24,21 +24,7 @@ public class ActuadorRele {
 		this.idPlaca = idPlaca;
 		this.idGroup = idGroup;
 		this.idDB = idDB;
-	}/*
-	public ActuadorRele(String idRele, String estado, String idPlaca, String idGroup,
-			String idDB) {
-		super();
-		this.idRele = Integer.valueOf(idRele);
-		
-		if(estado=="false")this.estado=false;
-		else if(estado=="true")this.estado=true;
-		else this.estado = null;
-		
-		this.timestamp = System.currentTimeMillis();
-		this.idPlaca = Integer.valueOf(idPlaca);
-		this.idGroup = Integer.valueOf(idGroup);
-		this.idDB = Integer.valueOf(idDB);
-	}*/
+	}
 
 	public Integer getIdRele() {
 		return idRele;
