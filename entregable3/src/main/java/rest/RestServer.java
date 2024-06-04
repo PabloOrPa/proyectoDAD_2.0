@@ -51,7 +51,7 @@ public class RestServer extends AbstractVerticle {
 		
 		
 		// Tratamos los posibles resultados del despliegue del server:
-		vertx.createHttpServer().requestHandler(router::handle).listen(8084, result -> {
+		vertx.createHttpServer().requestHandler(router::handle).listen(8084, "0.0.0.0", result -> {
 			if(result.succeeded())startFuture.complete();
 			else startFuture.fail(result.cause());
 		});

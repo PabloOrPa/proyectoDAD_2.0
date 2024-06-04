@@ -17,11 +17,7 @@ public class ActuadorRele {
 		this.idRele = idRele;
 		
 		this.estado = estado;
-		/*
-		if(estado==0)this.estado=false;
-		else if(estado==1)this.estado=true;
-		else this.estado = null;
-		*/
+
 		this.timestamp = System.currentTimeMillis();
 		this.idPlaca = idPlaca;
 		this.idGroup = idGroup;
