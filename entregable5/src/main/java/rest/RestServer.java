@@ -54,7 +54,7 @@ public class RestServer extends AbstractVerticle {
 		// Instanciamos el cliente mqtt
 	    mqttClient = MqttClient.create(vertx, options);
 	    // Nos conectamos
-	    mqttClient.connect(1883, "localhost", s -> {
+	    mqttClient.connect(1883, "192.168.169.35", s -> {
 	        if (s.succeeded()) {
 	            System.out.println("Connected to MQTT broker");
 	        } else {
