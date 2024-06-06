@@ -31,8 +31,8 @@ import io.vertx.mqtt.MqttClientOptions;
 
 
 public class RestServer extends AbstractVerticle {
-	private Boolean luces = false;
-	private static Double lastValueTemperatura = 0.0;
+	private Boolean luces = null;
+	private Boolean ventiladores = null;
 	
 	
 	
@@ -137,7 +137,8 @@ public class RestServer extends AbstractVerticle {
 									row.getLong("tStamp"),
 									row.getInteger("idPlaca"),
 									row.getInteger("idGroup"),
-									row.getInteger("id"));
+									row.getInteger("id"),
+									row.getString("tipo"));
 							releList.add(ar);
 						});
 						routingContext.response()
@@ -175,7 +176,8 @@ public class RestServer extends AbstractVerticle {
 									row.getLong("tStamp"),
 									row.getInteger("idPlaca"),
 									row.getInteger("idGroup"),
-									row.getInteger("id"));
+									row.getInteger("id"),
+									row.getString("tipo"));
 							releList.add(ar);
 						});
 						routingContext.response()
@@ -212,7 +214,8 @@ public class RestServer extends AbstractVerticle {
 								row.getLong("tStamp"),
 								row.getInteger("idPlaca"),
 								row.getInteger("idGroup"),
-								row.getInteger("id"));
+								row.getInteger("id"),
+								row.getString("tipo"));
 						
 						routingContext.response()
 						.putHeader("content-type", "application/json")
@@ -260,7 +263,8 @@ public class RestServer extends AbstractVerticle {
 									row.getLong("tStamp"),
 									row.getInteger("idPlaca"),
 									row.getInteger("idGroup"),
-									row.getInteger("id"));
+									row.getInteger("id"),
+									row.getString("tipo"));
 							releList.add(ar);
 						});
 						routingContext.response()
@@ -288,13 +292,14 @@ public class RestServer extends AbstractVerticle {
 		Long tStamp = System.currentTimeMillis();
 		Integer idPlaca = body.getInteger("idPlaca");
 		Integer idGrupo = body.getInteger("idGroup");
+		String tipo = body.getString("tipo");
 		
 		// 2º - Intentamos el POST
 		mySqlClient.getConnection(connection ->{
 			if(connection.succeeded()) {
 				connection.result()
-				.preparedQuery("INSERT INTO domoticadad.reles (idRele, estado, tStamp, idPlaca, idGroup) "
-						+ "VALUES (?,?,?,?,?)").execute(Tuple.of(idRele, estado, tStamp, idPlaca, idGrupo),
+				.preparedQuery("INSERT INTO domoticadad.reles (idRele, estado, tStamp, idPlaca, idGroup, tipo) "
+						+ "VALUES (?,?,?,?,?,?)").execute(Tuple.of(idRele, estado, tStamp, idPlaca, idGrupo, tipo),
 						res ->{
 							if(res.succeeded()) {
 								routingContext.response().setStatusCode(201).end("Rele añadido correctamente");
@@ -481,14 +486,16 @@ public class RestServer extends AbstractVerticle {
 		// 2º - Intentamos el POST
 		mySqlClient.getConnection(connection ->{
 			if(connection.succeeded()) {
+				
+				// Extraemos el último estado de todos los actuadores ordenados por (idRele, idPlaca)
 				connection.result()
 				.preparedQuery("SELECT r1.*"
 						+ " FROM domoticadad.reles r1 "
 						+ " INNER JOIN ("
-						+ "    SELECT idRele, MAX(tStamp) AS maxTimestamp"
+						+ "    SELECT idRele, idPlaca, MAX(tStamp) AS maxTimestamp"
 						+ "    FROM domoticadad.reles"
 						+ "    WHERE idGroup = ?"
-						+ "    GROUP BY idRele"
+						+ "    GROUP BY idRele, idPlaca"
 						+ ") r2 ON r1.idRele = r2.idRele AND r1.tStamp = r2.maxTimestamp"
 						+ " WHERE r1.idGroup = ?")
 				.execute(Tuple.of(idGrupo, idGrupo), res ->{
@@ -500,10 +507,14 @@ public class RestServer extends AbstractVerticle {
 									row.getLong("tStamp"),
 									row.getInteger("idPlaca"),
 									row.getInteger("idGroup"),
-									row.getInteger("id"));
+									row.getInteger("id"),
+									row.getString("tipo"));
 							relesList.add(sl);
 						});
-						luces = relesList.stream().map(x -> x.getEstado()).anyMatch(x -> x==false);
+						// Si algún actuador del tipo Bombilla está apagado: luces = true
+						luces = relesList.stream().filter(x -> x.getTipo().equals("Bombilla")).map(x -> x.getEstado()).anyMatch(x -> x==false);
+						if(relesList.stream().filter(x -> x.getTipo().equals("Bombilla")).toList().isEmpty()) luces = null;
+						
 					}
 					connection.result().close();
 				});
@@ -518,18 +529,23 @@ public class RestServer extends AbstractVerticle {
 								// Si se añade correctamente, verificamos el estado del sensor para decidir qué hacer
 								// Nótese que hay una separación puntos de luminosidad entre encendido y apagado.
 								// Esto es para que si estamos en la "frontera", no se enciendan y apaguen constantemente los actuadores
-								if(valor<1400.0 && luces) {
-									// Enciende
-									// 1º Comprueba si el valor anterior registrado por ese sensor coincide en cuanto al umbral (para no spamear)
-									// Si NO coincide, ha habido un cambio de "estado" y se manda el mensaje por mqtt
-									String topic = "Group" + idGrupo;
-									String mensaje = "LuzON";
-									mqttClient.publish(topic, Buffer.buffer(mensaje), MqttQoS.AT_LEAST_ONCE, false, false);
-								}else if(valor>1600.0 && !luces){
-									// Apaga
-									String topic = "Group" + idGrupo;
-									String mensaje = "LuzOFF";
-									mqttClient.publish(topic, Buffer.buffer(mensaje), MqttQoS.AT_LEAST_ONCE, false, false);
+								
+								//
+								if(luces != null) {
+									if(valor<1400.0 && luces) {
+										// Enciende
+										// 1º Comprueba si la luminosidad es baja y si hay alguna bombilla apagada
+										// Si se cumplen ambas, está oscuro y todavía no se ha encendido alguna -> se manda el mensaje por mqtt
+										String topic = "Group" + idGrupo;
+										String mensaje = "LuzON";
+										mqttClient.publish(topic, Buffer.buffer(mensaje), MqttQoS.AT_LEAST_ONCE, false, false);
+									}else if(valor>1600.0 && !luces){
+										// Apaga
+										// Misma lógica pero a la inversa que en el anterior
+										String topic = "Group" + idGrupo;
+										String mensaje = "LuzOFF";
+										mqttClient.publish(topic, Buffer.buffer(mensaje), MqttQoS.AT_LEAST_ONCE, false, false);
+									}
 								}
 							}else {
 								routingContext.response().setStatusCode(500).end("Database error: " + res.cause().getMessage());
@@ -715,11 +731,35 @@ public class RestServer extends AbstractVerticle {
 		// 2º - Intentamos el POST
 		mySqlClient.getConnection(connection ->{
 			if(connection.succeeded()) {
+				
+				// Extraemos el último estado de todos los actuadores ordenados por (idRele, idPlaca)
 				connection.result()
-				.preparedQuery("SELECT * FROM domoticadad.sTemp WHERE idSTemp = ? ORDER BY tStamp DESC LIMIT 1")
-				.execute(Tuple.of(idSTemp), res->{
+				.preparedQuery("SELECT r1.*"
+						+ " FROM domoticadad.reles r1 "
+						+ " INNER JOIN ("
+						+ "    SELECT idRele, idPlaca, MAX(tStamp) AS maxTimestamp"
+						+ "    FROM domoticadad.reles"
+						+ "    WHERE idGroup = ?"
+						+ "    GROUP BY idRele, idPlaca"
+						+ ") r2 ON r1.idRele = r2.idRele AND r1.tStamp = r2.maxTimestamp"
+						+ " WHERE r1.idGroup = ?")
+				.execute(Tuple.of(idGrupo, idGrupo), res ->{
 					if(res.succeeded()) {
-						lastValueTemperatura = res.result().iterator().next().getDouble("valor");
+						List<ActuadorRele> relesList = new ArrayList<>();
+						res.result().forEach(row -> {
+							ActuadorRele reles = new ActuadorRele(row.getInteger("idRele"), 
+									row.getBoolean("estado"),
+									row.getLong("tStamp"),
+									row.getInteger("idPlaca"),
+									row.getInteger("idGroup"),
+									row.getInteger("id"),
+									row.getString("tipo"));
+							relesList.add(reles);
+						});
+						// Si algún actuador del tipo Bombilla está apagado: luces = true
+						
+						ventiladores = relesList.stream().filter(x -> x.getTipo().equals("Ventilador")).map(x -> x.getEstado()).anyMatch(x -> x==false);
+						if(relesList.stream().filter(x -> x.getTipo().equals("Ventilador")).toList().isEmpty()) ventiladores = null;
 					}
 					connection.result().close();
 				});
@@ -731,14 +771,18 @@ public class RestServer extends AbstractVerticle {
 							if(res.succeeded()) {
 								routingContext.response().setStatusCode(201).end("SensorTemp añadido correctamente");
 								// Mismo procedimiento que con los sensores de Luz
-								if(valor>30.0 && lastValueTemperatura<30.0) {
-									String topic = "Group" + idGrupo;
-									String mensaje = "VentiladorON";
-									mqttClient.publish(topic, Buffer.buffer(mensaje), MqttQoS.AT_LEAST_ONCE, false, false);
-								}else if(valor<27.0 && lastValueTemperatura>27.0) {
-									String topic = "Group" + idGrupo;
-									String mensaje = "VentiladorOFF";
-									mqttClient.publish(topic, Buffer.buffer(mensaje), MqttQoS.AT_LEAST_ONCE, false, false);
+								if(ventiladores!=null) {
+									// Si es nulo, la inicialización ha debido ir mal, por lo que con reiniciar el dispositivo físico
+									// debería solucionarse eventualmente, ya que las placas publican un primer POST de cada actuador siempre
+									if(valor>30.0 && ventiladores) {
+										String topic = "Group" + idGrupo;
+										String mensaje = "VentiladorON";
+										mqttClient.publish(topic, Buffer.buffer(mensaje), MqttQoS.AT_LEAST_ONCE, false, false);
+									}else if(valor<27.0 && !ventiladores) {
+										String topic = "Group" + idGrupo;
+										String mensaje = "VentiladorOFF";
+										mqttClient.publish(topic, Buffer.buffer(mensaje), MqttQoS.AT_LEAST_ONCE, false, false);
+									}
 								}
 							}else {
 								routingContext.response().setStatusCode(500).end("Database error: " + res.cause().getMessage());

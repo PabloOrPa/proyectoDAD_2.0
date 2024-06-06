@@ -10,9 +10,10 @@ public class ActuadorRele {
 	private Integer idPlaca;
 	private Integer idGroup;
 	private Integer idDB;
+	private String tipo;
 	
 	public ActuadorRele(Integer idRele, Boolean estado, Integer idPlaca, Integer idGroup,
-			Integer idDB) {
+			Integer idDB, String tipo) {
 		super();
 		this.idRele = idRele;
 		
@@ -22,10 +23,11 @@ public class ActuadorRele {
 		this.idPlaca = idPlaca;
 		this.idGroup = idGroup;
 		this.idDB = idDB;
+		this.tipo = tipo;
 	}
 	
 	public ActuadorRele(Integer idRele, Boolean estado,Long timestamp, Integer idPlaca, Integer idGroup,
-			Integer idDB) {
+			Integer idDB, String tipo) {
 		super();
 		this.idRele = idRele;
 		
@@ -35,26 +37,10 @@ public class ActuadorRele {
 		this.idPlaca = idPlaca;
 		this.idGroup = idGroup;
 		this.idDB = idDB;
+		this.tipo = tipo;
 	}
 	
-	
-	
-	
-	/*
-	public ActuadorRele(I idRele, String estado, String idPlaca, String idGroup,
-			String idDB) {
-		super();
-		this.idRele = Integer.valueOf(idRele);
-		
-		if(estado=="false")this.estado=false;
-		else if(estado=="true")this.estado=true;
-		else this.estado = null;
-		
-		this.timestamp = System.currentTimeMillis();
-		this.idPlaca = Integer.valueOf(idPlaca);
-		this.idGroup = Integer.valueOf(idGroup);
-		this.idDB = Integer.valueOf(idDB);
-	}*/
+
 
 	public Integer getIdRele() {
 		return idRele;
@@ -104,9 +90,17 @@ public class ActuadorRele {
 		this.idDB = idDB;
 	}
 
+	public String getTipo() {
+		return tipo;
+	}
+
+	public void setTipo(String tipo) {
+		this.tipo = tipo;
+	}
+
 	@Override
 	public int hashCode() {
-		return Objects.hash(estado, idDB, idGroup, idPlaca, idRele, timestamp);
+		return Objects.hash(estado, idDB, idGroup, idPlaca, idRele, timestamp, tipo);
 	}
 
 	@Override
@@ -120,14 +114,17 @@ public class ActuadorRele {
 		ActuadorRele other = (ActuadorRele) obj;
 		return Objects.equals(estado, other.estado) && Objects.equals(idDB, other.idDB)
 				&& Objects.equals(idGroup, other.idGroup) && Objects.equals(idPlaca, other.idPlaca)
-				&& Objects.equals(idRele, other.idRele) && Objects.equals(timestamp, other.timestamp);
+				&& Objects.equals(idRele, other.idRele) && Objects.equals(timestamp, other.timestamp)
+				&& Objects.equals(tipo, other.tipo);
 	}
 
 	@Override
 	public String toString() {
 		return "ActuadorRele [idRele=" + idRele + ", estado=" + estado + ", timestamp=" + timestamp + ", idPlaca="
-				+ idPlaca + ", idGroup=" + idGroup + ", idDB=" + idDB + "]";
+				+ idPlaca + ", idGroup=" + idGroup + ", idDB=" + idDB + ", tipo=" + tipo + "]";
 	}
+
+	
 	
 	
 
