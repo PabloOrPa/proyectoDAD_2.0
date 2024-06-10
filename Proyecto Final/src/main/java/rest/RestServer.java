@@ -10,11 +10,17 @@ import io.netty.handler.codec.mqtt.MqttQoS;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Promise;
 import io.vertx.core.buffer.Buffer;
+import io.vertx.core.http.HttpMethod;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
+import io.vertx.ext.auth.JWTOptions;
+import io.vertx.ext.auth.KeyStoreOptions;
+import io.vertx.ext.jdbc.JDBCClient;
+import io.vertx.ext.sql.SQLConnection;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
 import io.vertx.ext.web.handler.BodyHandler;
+import io.vertx.ext.web.handler.CorsHandler;
 import io.vertx.mysqlclient.MySQLConnectOptions;
 import io.vertx.mysqlclient.MySQLPool;
 import io.vertx.sqlclient.PoolOptions;
@@ -33,9 +39,7 @@ import io.vertx.mqtt.MqttClientOptions;
 public class RestServer extends AbstractVerticle {
 	private Boolean luces = null;
 	private Boolean ventiladores = null;
-	
-	
-	
+		
 	// Declaramos el cliente SQL
 	private MySQLPool mySqlClient;
 	
@@ -65,6 +69,13 @@ public class RestServer extends AbstractVerticle {
 	
 	public void start(Promise<Void> startFuture) {
 		
+		
+		
+		
+		
+		
+		
+		
 		// Instanciamos Gson
 		gson = new GsonBuilder().setDateFormat("dd-MM-yyyy").create();
 		
@@ -88,6 +99,22 @@ public class RestServer extends AbstractVerticle {
 			if(result.succeeded())startFuture.complete();
 			else startFuture.fail(result.cause());
 		});
+		
+		// Para la web:
+		// Enable CORS for all routes
+	    // Sirve para poder acceder desde ips "ajenas"
+        router.route().handler(CorsHandler.create()
+      	      .allowedMethod(HttpMethod.GET)
+      	      .allowedMethod(HttpMethod.POST)
+      	      .allowedMethod(HttpMethod.OPTIONS)
+      	      .allowedHeader("Access-Control-Allow-Methods")
+      	      .allowedHeader("Access-Control-Allow-Origin")
+      	      .allowedHeader("Content-Type")
+      	      .allowedHeader("Access-Control-Allow-Headers"));
+		
+		
+		
+		
 		
 
 		// API relés:
@@ -114,8 +141,239 @@ public class RestServer extends AbstractVerticle {
 		router.get("/api/sTemp/estado/:idGroup").handler(this::getAllSTempFromGroup);
 		router.post("/api/sTemp/").handler(this::addOneSTemp);
 		
+		
+		// API Sesiones:
+		router.route("/api/register").handler(BodyHandler.create());
+        router.post("/api/register").handler(this::registerHandler);
+        router.route("/api/login").handler(BodyHandler.create());
+        router.post("/api/login").handler(this::loginHandler);
+		
+        // API peticiones de la web:
+        router.route("/api/groupUser").handler(BodyHandler.create());
+        router.post("/api/groupUser").handler(this::linkGroupWithUser);
+        router.get("/api/groupUser").handler(this::getAllGroupsFromUser);
+        
+        router.get("/api/sTemp/historico/:idGroup").handler(this::getHistoricoSTemp);
+        router.get("/api/sLuz/historico/:idGroup").handler(this::getHistoricoSLuz);
+    
 	}
 	
+	
+	// Para la WEB
+	
+	// Para las gráficas:
+	
+	private void getHistoricoSLuz(RoutingContext routingContext) {
+		Integer idGroup = Integer.valueOf(routingContext.request().getParam("idGroup"));
+		mySqlClient.getConnection(connection -> {
+			if(connection.succeeded()) {
+				
+				connection.result()
+				.preparedQuery("SELECT * FROM domoticadad.sLuz WHERE idGroup = ? ")
+				.execute(Tuple.of(idGroup), res -> {
+					if(res.succeeded()) {
+						// Si se hace la consulta correctamente, creo una lista en la que almaceno las entradas del rele
+						List<SensorLuz> sLuzList = new ArrayList<>();
+
+						res.result().forEach(row -> {
+							SensorLuz sl = new SensorLuz(row.getInteger("idSLuz"), 
+									row.getDouble("valor"),
+									row.getLong("tStamp"),
+									row.getInteger("idPlaca"),
+									row.getInteger("idGroup"),
+									row.getInteger("id"));
+							sLuzList.add(sl);
+						});
+						routingContext.response()
+						.putHeader("content-type", "application/json")
+                        .end(gson.toJson(sLuzList));
+					}else {
+						routingContext.response().setStatusCode(500).end("Database error: " + res.cause().getMessage());
+					}
+					connection.result().close();
+				});
+				
+			}else {
+				routingContext.response().setStatusCode(500).end("Connection error: " + connection.cause().getMessage());
+			}
+		});
+	}
+	
+	
+	private void getHistoricoSTemp(RoutingContext routingContext) {
+		Integer idGroup = Integer.valueOf(routingContext.request().getParam("idGroup"));
+		mySqlClient.getConnection(connection -> {
+			if(connection.succeeded()) {
+				
+				connection.result()
+				.preparedQuery("SELECT * FROM domoticadad.sTemp WHERE idGroup = ? ")
+				.execute(Tuple.of(idGroup), res -> {
+					if(res.succeeded()) {
+						// Si se hace la consulta correctamente, creo una lista en la que almaceno las entradas del rele
+						List<SensorTemperatura> sTempList = new ArrayList<>();
+						
+						res.result().forEach(row -> {
+							SensorTemperatura st = new SensorTemperatura(row.getInteger("idSTemp"), 
+									row.getDouble("valor"),
+									row.getLong("tStamp"),
+									row.getInteger("idPlaca"),
+									row.getInteger("idGroup"),
+									row.getInteger("id"));
+							sTempList.add(st);
+						});
+						routingContext.response()
+						.putHeader("content-type", "application/json")
+                        .end(gson.toJson(sTempList));
+					}else {
+						routingContext.response().setStatusCode(500).end("Database error: " + res.cause().getMessage());
+					}
+					connection.result().close();
+				});
+				
+			}else {
+				routingContext.response().setStatusCode(500).end("Connection error: " + connection.cause().getMessage());
+			}
+		});
+			
+	}
+	
+	
+	
+	
+	
+	
+	// Manejadores sesiones:
+	
+	private void registerHandler(RoutingContext context) {
+        JsonObject body = context.body().asJsonObject();
+        String username = body.getString("username");
+        String password = body.getString("password");
+
+        mySqlClient.getConnection(ar -> {
+            if (ar.failed()) {
+                context.fail(ar.cause());
+                return;
+            }
+            ar.result().preparedQuery("INSERT INTO Usuarios (username, password) VALUES (?, ?)")
+            .execute(
+                Tuple.of(username,password), res -> {
+                ar.result().close();
+                if (res.failed()) {
+                    context.response().setStatusCode(400).end("Error al registrar usuario");
+                } else {
+                    context.response().setStatusCode(201).end("Usuario registrado con éxito");
+                }
+            });
+        });
+    }
+
+	 private void loginHandler(RoutingContext context) {
+		 System.out.println("LOGIN!");
+		 JsonObject body = context.body().asJsonObject();
+		 System.out.println("");
+	        String username = body.getString("username");
+	        String password = body.getString("password");
+	        
+	        mySqlClient.getConnection(ar -> {
+	            if (ar.failed()) {
+	                context.fail(ar.cause());
+	                return;
+	            }
+	            ar.result().preparedQuery("SELECT * FROM Usuarios WHERE username = ? AND password = ?").execute(
+	                Tuple.of(username, password), res -> {
+	                ar.result().close();
+	                if (res.failed()) {
+	                    context.response().setStatusCode(401).end("Error en el login");
+	                } else {
+	                    if (res.result().size() == 0) {
+	                        context.response().setStatusCode(401).end("Usuario o contraseña incorrectos");
+	                    } else {
+	                        context.response().putHeader("Content-Type", "application/json")
+	                            .end(new JsonObject().put("message", "Login exitoso").put("username", username).encode());
+	                    }
+	                }
+	            });
+	        });
+	    }
+	
+	 
+	 // Apropiación de un grupo:
+	 
+	 private void linkGroupWithUser(RoutingContext routingContext) {
+		 JsonObject body = routingContext.body().asJsonObject();
+		 Integer idGroup = Integer.valueOf(body.getString("idGroup"));
+		 String username = body.getString("username");
+		 
+		 mySqlClient.getConnection(connection -> {
+				if(connection.succeeded()) {
+					connection.result()
+					.preparedQuery("SELECT * FROM domoticadad.grupoYUsuarios WHERE idGroup= ?;")
+					.execute(Tuple.of(idGroup),res -> {
+						if(res.succeeded()) {
+							
+							if(res.result().size()==0) {
+								connection.result().preparedQuery("INSERT INTO grupoYUsuarios (username, idGroup) VALUES (?, ?);")
+								.execute(Tuple.of(username, idGroup), resultado -> {
+									if(resultado.succeeded()) {
+										routingContext.response().setStatusCode(201).end("Grupo añadido correctamente");
+									}else {
+										routingContext.response().setStatusCode(500).end("Database error: " + resultado.cause().getMessage());
+									}
+								});
+							}else{
+								routingContext.response().setStatusCode(500).end("El grupo ya tiene propietario");
+							};
+							
+							
+							
+						}else {
+							routingContext.response().setStatusCode(500).end("Database error: " + res.cause().getMessage());
+						}
+						connection.result().close();// Importante cerrar siempre la conexion
+					});
+
+				}else {
+					routingContext.response().setStatusCode(500).end("Connection error: " + connection.cause().getMessage());
+				}
+			});
+	 }
+	 
+	 private void getAllGroupsFromUser(RoutingContext routingContext) {
+		 String username = routingContext.request().getParam("username");
+		 
+		 mySqlClient.getConnection(connection -> {
+				if(connection.succeeded()) {
+					connection.result()
+					.preparedQuery("SELECT * FROM domoticadad.grupoYUsuarios WHERE username= ?;")
+					.execute(Tuple.of(username),res -> {
+						if(res.succeeded()) {
+							
+							if(res.result().size()!=0) {
+								List<Integer> grupos = new ArrayList<>();
+								for(Row elemento: res.result()) {
+									grupos.add(elemento.getInteger("idGroup"));
+								}
+								System.out.println(grupos);
+								routingContext.response().end(gson.toJson(grupos));
+							}else{
+								routingContext.response().setStatusCode(500).end("No tienes ningún grupo");
+							};
+							
+						}else {
+							routingContext.response().setStatusCode(500).end("Database error: " + res.cause().getMessage());
+						}
+						connection.result().close();// Importante cerrar siempre la conexion
+					});
+
+				}else {
+					routingContext.response().setStatusCode(500).end("Connection error: " + connection.cause().getMessage());
+				}
+			});
+	 }
+	 
+	 
+	 
+	 
 	
 	// Funciones de la API con BBDD
 	
@@ -677,7 +935,7 @@ public class RestServer extends AbstractVerticle {
 			if(connection.succeeded()) {
 				
 				Integer idGroup = Integer.valueOf(routingContext.request().getParam("idGroup"));
-				
+				System.out.println("Aquí el grupo: " + idGroup);
 				connection.result()
 				.preparedQuery("SELECT r1.*"
 						+ " FROM domoticadad.sTemp r1 "
@@ -794,24 +1052,6 @@ public class RestServer extends AbstractVerticle {
 			}
 		});
 	}
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
 	
 	
 }
