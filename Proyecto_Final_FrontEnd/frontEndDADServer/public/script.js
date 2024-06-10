@@ -1,4 +1,4 @@
-const apiBaseUrl = 'http://localhost:8084/api';
+const apiBaseUrl = 'http://192.168.169.35:8084/api';
 
 $(document).ready(function () {
     // Check if user is logged in
@@ -10,16 +10,23 @@ $(document).ready(function () {
     }
 
     // Asignar manejadores de eventos al documento en lugar de a elementos específicos
-    $(document).on('click', '#login-btn', handleLogin);
-    $(document).on('click', '#register-btn', handleRegister);
-    $(document).on('click', '#logout-btn', handleLogout);
-    $(document).on('click', '#show-register', showRegister);
-    $(document).on('click', '#show-login', showLogin);
-    $(document).on('click', '#register-group-btn', handleRegisterGroup);
-    $(document).on('focus', '#grupos-del-user', handleGruposDelUser);
-    $(document).on('click', '#boton-estado', handleEstado);
-    $(document).on('click', '#boton-historico-temp', handleHistoricoTemp);
-    $(document).on('click', '#boton-historico-luz', handleHistoricoLuz);
+    $(document).on('click', '#login-btn', handleLogin);                 // Maneja el login. Si es satisfactorio -> Muestra el Dashboard
+    $(document).on('click', '#register-btn', handleRegister);           // Maneja el register
+    $(document).on('click', '#logout-btn', handleLogout);               // Maneja el cierre de sesión
+    $(document).on('click', '#show-register', showRegister);            // Muestra la interfaz de Registro
+    $(document).on('click', '#show-login', showLogin);                  // Muestra la interfaz de Login
+    $(document).on('click', '#register-group-btn', handleRegisterGroup);// Registra un grupo domótico a nuestro nombre
+    $(document).on('focus', '#grupos-del-user', handleGruposDelUser);// Este evento ha de ser "focus", ya que el "click" resetea las opciones del menú cuando se abre pero también cuando se selecciona un elemento
+    $(document).on('click', '#boton-estado', handleEstado);                 // Muestra el estado de sensores y actuadores
+    $(document).on('click', '#boton-historico-temp', handleHistoricoTemp);  // Muestra un gráfico con la evolución de la temperatura
+    $(document).on('click', '#boton-historico-luz', handleHistoricoLuz);    // Muestra un gráfico con la evolución de la luminosidad
+    $(document).on('click', '#show-manualOverride', handleManualOverride);  // Muestra la interfaz de control manual
+    $(document).on('click', '#boton-manualOverride-desactivado', activaManualOverride); // Activa el control manual
+    $(document).on('click', '#boton-manualOverride-activado', desactivaManualOverride); // Desactiva el control manual
+    $(document).on('click', '#boton-lucesON', enciendeLuces);               // Enciende las luces de manera manual
+    $(document).on('click', '#boton-lucesOFF', apagaLuces);                 // Apaga las luces de manera manual
+    $(document).on('click', '#boton-ventiladoresON', enciendeVentiladores); // Enciende los ventiladores de manera manual
+    $(document).on('click', '#boton-ventiladoresOFF', apagaVentiladores);   // Apaga los ventiladores de manera manual
 });
 
 
@@ -125,23 +132,6 @@ function graficoLuz(datos) {
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // Función auxiliar directamente robada de utils.js de IISSI2
 function parseHTML(str) {
     let tmp = document.implementation.createHTMLDocument();
@@ -199,8 +189,6 @@ function asCardRele(rele) {
         } else if (rele.estado == false) {
             imagenUrl = "./images/VentiladorOFF.png";
         }
-    } else {
-        console.log("No entendí ni verga");
     }
 
 
@@ -222,6 +210,159 @@ function asCardRele(rele) {
 
 
 // Manejadores de eventos: 
+
+async function handleManualOverride(){
+    // En esta función cambiamos el contenido del display por un cuadro de mandos
+    const idGroup = document.getElementById('grupos-del-user').value;
+    let manualOverride = null;
+    
+
+    // Vemos el estado del manualOverride en la Base de datos
+    // /groupUser/estadoMO/35
+    await $.ajax({
+        url: `${apiBaseUrl}/groupUser/estadoMO/${idGroup}`,
+        method: 'GET',
+        contentType: 'application/json',
+        success: function (response) {
+            manualOverride = response;
+        }
+    });
+   
+    
+
+    if(manualOverride){
+        activaManualOverride();
+    }else{
+        desactivaManualOverride();
+    }
+    // Creamos el botón en consecuencia
+    
+    
+
+}
+
+function activaManualOverride(){
+    // En esta función Comunicamos en la API qué queremos hacer con los actuadores
+    const idGroup = document.getElementById('grupos-del-user').value;
+    const display = document.getElementById('display');
+    
+    let grafico = parseHTML('<div class="row justify-content-center" style="margin:5%"><button id="boton-manualOverride-activado" class="btn btn-success">Desactiva Control Manual</button></div>');
+    
+    let manualOverride = true;
+
+    $.ajax({
+        url: `${apiBaseUrl}/groupUser`, // URL del recurso que deseas actualizar
+        method: 'PUT', // Método HTTP cambiado a PUT
+        contentType: 'application/json', // Tipo de contenido
+        data: JSON.stringify({ manualOverride, idGroup }), // Datos a enviar en formato JSON
+        success: function (response) {
+            display.innerHTML = '';
+            display.appendChild(grafico);
+            display.append(parseHTML('<div id="botones-control-manual-luces" class="row justify-content-center"></div>'));
+            display.append(parseHTML('<div id="botones-control-manual-ventiladores" class="row justify-content-center"></div>'));
+            addBotones();
+        },
+        error: function (xhr) {
+            alert("Hubo un error: " + xhr.responseText);
+        }
+    });
+    
+}
+async function addBotones(){
+    const idGroup = document.getElementById('grupos-del-user').value;
+    const botonesL = document.getElementById('botones-control-manual-luces');
+    const botonesV = document.getElementById('botones-control-manual-ventiladores');
+    let bombillas = false;
+    let ventiladores = false;
+
+    await $.ajax({
+        url: `${apiBaseUrl}/reles/estado/${idGroup}`,
+        method: 'GET',
+        contentType: 'application/json',
+        success: function (response) {
+
+            response.forEach(function (item) {
+                if(item.tipo=="Bombilla"){
+                    bombillas=true;
+                }else if(item.tipo=="Ventilador"){
+                    ventiladores=true;
+                }
+            });
+
+        }
+    });
+
+    if(bombillas){
+        botonesL.appendChild(parseHTML('<button id="boton-lucesON" class="btn btn-warning" style="margin:2%; padding:1%"> Encender luces </button>'));
+        botonesL.appendChild(parseHTML('<button id="boton-lucesOFF" class="btn btn-dark" style="margin:2%; padding:1%"> Apagar luces</button>'));
+    }
+
+    if(ventiladores){
+        botonesV.appendChild(parseHTML('<button id="boton-ventiladoresON" class="btn btn-warning" style="margin:2%; padding:1%"> Encender ventiladores </button>'));
+        botonesV.appendChild(parseHTML('<button id="boton-ventiladoresOFF" class="btn btn-dark" style="margin:2%; padding:1%"> Apagar ventiladores </button>'));
+    }
+
+}
+
+function enciendeLuces(){
+    const idGroup = document.getElementById('grupos-del-user').value;
+    enciendeApagaManual(true, "Bombilla",idGroup);
+}
+
+function apagaLuces(){
+    const idGroup = document.getElementById('grupos-del-user').value;
+    enciendeApagaManual(false, "Bombilla",idGroup);
+}
+
+function enciendeVentiladores(){
+    const idGroup = document.getElementById('grupos-del-user').value;
+    enciendeApagaManual(true, "Ventilador",idGroup);
+}
+
+function apagaVentiladores(){
+    const idGroup = document.getElementById('grupos-del-user').value;
+    enciendeApagaManual(false, "Ventilador",idGroup);
+}
+
+function enciendeApagaManual(estado, tipo, idGroup){
+    $.ajax({
+        url: `${apiBaseUrl}/reles/manual`,
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ estado, tipo, idGroup }),
+        success: function (response) {
+            $('#user-group-error').text("Exito en la petición").removeClass('hidden')
+        },
+        error: function (xhr) {
+            alert(xhr.responseText);
+        }
+    });
+}
+
+function desactivaManualOverride(){
+    // En esta función Comunicamos en la API qué queremos hacer con los actuadores
+    const idGroup = document.getElementById('grupos-del-user').value;
+    const display = document.getElementById('display');
+    let grafico = parseHTML('<div class="row justify-content-center"><button id="boton-manualOverride-desactivado" class="row btn btn-danger">Activa Control manual</button></div>');
+
+    let manualOverride = false;
+
+    $.ajax({
+        url: `${apiBaseUrl}/groupUser`, // URL del recurso que deseas actualizar
+        method: 'PUT', // Método HTTP cambiado a PUT
+        contentType: 'application/json', // Tipo de contenido
+        data: JSON.stringify({ manualOverride, idGroup }), // Datos a enviar en formato JSON
+        success: function (response) {
+            display.innerHTML = '';
+            display.appendChild(grafico);
+        },
+        error: function (xhr) {
+            alert("Hubo un error: " + xhr.responseText);
+        }
+    });
+}
+
+
 
 function handleHistoricoLuz(){
     const idGroup = document.getElementById('grupos-del-user').value;
@@ -271,7 +412,6 @@ function handleHistoricoTemp() {
 
 function handleEstado() {
     const idGroup = document.getElementById('grupos-del-user').value;
-    console.log(idGroup);
 
     const display = document.getElementById('display');
     display.innerHTML = '';
@@ -326,10 +466,7 @@ function handleEstado() {
         //data: {idGroup:idGroup},
         success: function (response) {
 
-            console.log(response);
-
             response.forEach(function (item) {
-                console.log(item.tipo + " " + item.idRele + ": " + item.estado);
                 let card = asCardRele(item);
                 rowActuadores.appendChild(card);
             });
@@ -352,7 +489,6 @@ function handleGruposDelUser() {
             const gruposSelect = $('#grupos-del-user');
 
             const grupos = JSON.parse(response);
-            console.log(response);
             // Vaciar el select actual
             gruposSelect.empty();
 
@@ -399,12 +535,10 @@ function handleLogin() {
         contentType: 'application/json',
         data: JSON.stringify({ username, password: hashedPassword }),
         success: function (response) {
-            alert("correcto");
             localStorage.setItem('username', username);
             showDashboard(username);
         },
         error: function (xhr) {
-            alert(xhr.responseText);
             $('#login-error').text(xhr.responseText).removeClass('hidden');
         }
     });
@@ -414,6 +548,7 @@ function handleRegister() {
     const username = $('#register-username').val();
     const password = $('#register-password').val();
     const confirmPassword = $('#register-confirm-password').val();
+    
 
     if (password !== confirmPassword) {
         $('#register-error').text('Las contraseñas no coinciden').removeClass('hidden');
@@ -426,7 +561,7 @@ function handleRegister() {
         url: `${apiBaseUrl}/register`,
         method: 'POST',
         contentType: 'application/json',
-        data: JSON.stringify(requestData),
+        data: JSON.stringify({ username, password: hashedPassword }),
         success: function () {
             showLogin();
         },
@@ -440,6 +575,13 @@ function handleLogout() {
     localStorage.removeItem('username');
     showLogin();
 }
+
+
+
+// Cambios de vista
+
+
+
 
 function showLogin() {
     $('#content').html(`
@@ -528,7 +670,7 @@ function showDashboard(username) {
                     <div class="row justify-content-center"><button id="boton-estado" class="btn btn-info" style="margin:3%; font-size:200%;">Consultar estado</button></div>
                     <div class="row justify-content-center"><button id="boton-historico-temp" class="btn btn-success" style="margin:3%; font-size:200%";>Histórico Temperatura</button></div>
                     <div class="row justify-content-center"><button id="boton-historico-luz" class="btn btn-success" style="margin:3%; font-size:200%";">Histórico Luz</button></div>
-                    <div class="row justify-content-center"><button id="ejemplo" class="btn btn-success" style="margin:3%; margin-bottom:20%; font-size:200%";">Ejemplo</button></div>
+                    <div class="row justify-content-center"><button id="show-manualOverride" class="btn btn-success" style="margin:3%; margin-bottom:20%; font-size:200%";">Control manual</button></div>
                     
                     
                     

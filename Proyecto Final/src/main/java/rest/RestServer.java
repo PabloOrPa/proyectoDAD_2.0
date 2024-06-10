@@ -39,7 +39,8 @@ import io.vertx.mqtt.MqttClientOptions;
 public class RestServer extends AbstractVerticle {
 	private Boolean luces = null;
 	private Boolean ventiladores = null;
-		
+	private Boolean manualOverride = null;
+	
 	// Declaramos el cliente SQL
 	private MySQLPool mySqlClient;
 	
@@ -106,6 +107,7 @@ public class RestServer extends AbstractVerticle {
         router.route().handler(CorsHandler.create()
       	      .allowedMethod(HttpMethod.GET)
       	      .allowedMethod(HttpMethod.POST)
+      	      .allowedMethod(HttpMethod.PUT)
       	      .allowedMethod(HttpMethod.OPTIONS)
       	      .allowedHeader("Access-Control-Allow-Methods")
       	      .allowedHeader("Access-Control-Allow-Origin")
@@ -118,15 +120,18 @@ public class RestServer extends AbstractVerticle {
 		
 
 		// API relés:
-		router.route("/api/reles*").handler(BodyHandler.create());		// Crea la "ruta"
-		router.get("/api/reles/todos").handler(this::getAllReles);			// Devuelve todas las entradas
-		router.get("/api/reles/all/:idRele").handler(this::getAllReleWithId);		// Entradas de un relé concreto (filtra por Id)
-		router.get("/api/reles/last/:idRele").handler(this::getLastReleWithId);
-		router.get("/api/reles/estado/:idGroup").handler(this::getAllRelesFromGroup);
-		router.post("/api/reles").handler(this::addOneRele);
+		router.route("/api/reles*").handler(BodyHandler.create());						// Crea la "ruta", fundamental para lost POST y los PUT
+		router.get("/api/reles/todos").handler(this::getAllReles);						// Devuelve todas las entradas
+		router.get("/api/reles/all/:idRele").handler(this::getAllReleWithId);			// Entradas de un relé concreto (filtra por Id)
+		router.get("/api/reles/last/:idRele").handler(this::getLastReleWithId);			// Devuelve la última entrada de un relé concreto
+		router.get("/api/reles/estado/:idGroup").handler(this::getAllRelesFromGroup);	// Devuelve la última entrada de todos los relés de un grupo
+		router.post("/api/reles").handler(this::addOneRele);							// Postea el estado de un relé
+		
+		router.post("/api/reles/manual").handler(this::setReleManual);	// Control manual de los actuadores
+		
 		
 		// API sensoresLuz:
-		router.route("/api/sLuz*").handler(BodyHandler.create());
+		router.route("/api/sLuz*").handler(BodyHandler.create());						// Manejadores equivalentes a los de los relés, pero para cada tipo de sensor
 		router.get("/api/sLuz/todos").handler(this::getAllSLuz);
 		router.get("/api/sLuz/all/:idSLuz").handler(this::getAllSLuzWithId);
 		router.get("/api/sLuz/last/:idSLuz").handler(this::getLastSLuzWithId);
@@ -143,20 +148,79 @@ public class RestServer extends AbstractVerticle {
 		
 		
 		// API Sesiones:
-		router.route("/api/register").handler(BodyHandler.create());
-        router.post("/api/register").handler(this::registerHandler);
-        router.route("/api/login").handler(BodyHandler.create());
-        router.post("/api/login").handler(this::loginHandler);
+		router.route("/api/register").handler(BodyHandler.create());					// Crea la ruta para el register
+        router.post("/api/register").handler(this::registerHandler);					// Postea un nuevo usuario
+        router.route("/api/login").handler(BodyHandler.create());						// Crea la ruta para el login
+        router.post("/api/login").handler(this::loginHandler);							// Inicia sesión
 		
         // API peticiones de la web:
-        router.route("/api/groupUser").handler(BodyHandler.create());
-        router.post("/api/groupUser").handler(this::linkGroupWithUser);
-        router.get("/api/groupUser").handler(this::getAllGroupsFromUser);
+        router.route("/api/groupUser").handler(BodyHandler.create());					// Crea la ruta para enlazar Usuarios con Grupos de placas
+        router.post("/api/groupUser").handler(this::linkGroupWithUser);					// Enlaza al usuario con un Grupo de placas
+        router.get("/api/groupUser").handler(this::getAllGroupsFromUser);				// Devuelve todos los grupos que pertenecen al usuario
+        router.get("/api/groupUser/estadoMO/:idGroup").handler(this::getEstadoMO);		// Devuelve el estado de control manual (activado, desactivado)
+        router.put("/api/groupUser").handler(this::setManualOverride);					// Activa o desactiva el control manual sobre los actuadores de un grupo
         
-        router.get("/api/sTemp/historico/:idGroup").handler(this::getHistoricoSTemp);
-        router.get("/api/sLuz/historico/:idGroup").handler(this::getHistoricoSLuz);
-    
+        
+        router.get("/api/sTemp/historico/:idGroup").handler(this::getHistoricoSTemp);	// Devuelve los datos de todas las lecturas de temperatura
+        router.get("/api/sLuz/historico/:idGroup").handler(this::getHistoricoSLuz);		// Devuelve los datos de todas las lecturas de luminosidad
+        
+        //************************************************************************************
+        // NOTA: El endpoint para el control manual de los relés está arriba en la API relés
+        //************************************************************************************
 	}
+	
+	
+	// Para el control manual:
+	
+	private void setReleManual(RoutingContext routingContext){
+		 JsonObject body = routingContext.body().asJsonObject();
+		 Integer idGroup = Integer.valueOf(body.getString("idGroup"));
+		 String tipo = body.getString("tipo");
+		 Boolean estado = Boolean.valueOf(body.getString("estado"));
+		 
+		 System.out.println("Set rele activado");
+		 mySqlClient.getConnection(connection -> {
+				if(connection.succeeded()) {
+					
+					connection.result().preparedQuery("SELECT manualOverride FROM domoticadad.grupoYUsuarios WHERE idGroup = ?").execute(Tuple.of(idGroup), res -> {
+						if(res.result().size()!=0) {
+							manualOverride = res.result().iterator().next().getBoolean("manualOverride");
+							
+							// Primero comprueba si está activado el manualOverride para evitar incongruencias provocadas por posibles glitches (ninguno encontrado hasta el momento)
+							if(manualOverride) {
+								String topic = "Group" + idGroup;
+								String mensaje = "";
+								if(tipo.equals("Bombilla")) {
+									if(estado) {
+										mensaje = "LuzON";
+									}else {
+										mensaje = "LuzOFF";
+									}
+								}else if(tipo.equals("Ventilador")) {
+									if(estado) {
+										mensaje = "VentiladorON";
+									}else {
+										mensaje = "VentiladorOFF";
+									}
+								}
+								
+								mqttClient.publish(topic, Buffer.buffer(mensaje), MqttQoS.AT_LEAST_ONCE, false, false);
+								routingContext.response().setStatusCode(201).end("Acción completada");
+							}
+						}
+					});
+					connection.result().close();
+					}
+				});
+		 
+	}
+	
+	
+	
+	
+	
+	
+	
 	
 	
 	// Para la WEB
@@ -242,13 +306,17 @@ public class RestServer extends AbstractVerticle {
 	
 	
 	
+	
+	
+	
 	// Manejadores sesiones:
 	
 	private void registerHandler(RoutingContext context) {
-        JsonObject body = context.body().asJsonObject();
+
+		JsonObject body = context.body().asJsonObject();
         String username = body.getString("username");
         String password = body.getString("password");
-
+        
         mySqlClient.getConnection(ar -> {
             if (ar.failed()) {
                 context.fail(ar.cause());
@@ -268,9 +336,8 @@ public class RestServer extends AbstractVerticle {
     }
 
 	 private void loginHandler(RoutingContext context) {
-		 System.out.println("LOGIN!");
+
 		 JsonObject body = context.body().asJsonObject();
-		 System.out.println("");
 	        String username = body.getString("username");
 	        String password = body.getString("password");
 	        
@@ -312,7 +379,7 @@ public class RestServer extends AbstractVerticle {
 						if(res.succeeded()) {
 							
 							if(res.result().size()==0) {
-								connection.result().preparedQuery("INSERT INTO grupoYUsuarios (username, idGroup) VALUES (?, ?);")
+								connection.result().preparedQuery("INSERT INTO grupoYUsuarios (username, idGroup, manualOverride) VALUES (?, ?, false);")
 								.execute(Tuple.of(username, idGroup), resultado -> {
 									if(resultado.succeeded()) {
 										routingContext.response().setStatusCode(201).end("Grupo añadido correctamente");
@@ -353,7 +420,6 @@ public class RestServer extends AbstractVerticle {
 								for(Row elemento: res.result()) {
 									grupos.add(elemento.getInteger("idGroup"));
 								}
-								System.out.println(grupos);
 								routingContext.response().end(gson.toJson(grupos));
 							}else{
 								routingContext.response().setStatusCode(500).end("No tienes ningún grupo");
@@ -371,8 +437,54 @@ public class RestServer extends AbstractVerticle {
 			});
 	 }
 	 
+	 private void getEstadoMO(RoutingContext routingContext) {
+		 String idGroup = routingContext.request().getParam("idGroup");
+		 mySqlClient.getConnection(connection -> {
+			 if(connection.succeeded()) {
+				 connection.result().preparedQuery("SELECT manualOverride FROM domoticadad.grupoYUsuarios WHERE idGroup = ?;").execute(Tuple.of(idGroup), res -> {
+					 if(res.succeeded()) {
+						 if(res.result().size()!=0) {
+							 routingContext.response().end(gson.toJson(res.result().iterator().next().getBoolean("manualOverride")));
+						 }else {
+							 connection.result().close();
+							 routingContext.response().setStatusCode(500).end("El grupo solicitado no se encuentra");
+						 }
+					 }else {
+						 connection.result().close();
+						 routingContext.response().setStatusCode(500).end("Database error: " + res.cause().getMessage());
+					 }
+				 });
+				 
+				 connection.result().close();
+			 }else {
+				 routingContext.response().setStatusCode(500).end("Connection error: " + connection.cause().getMessage());
+			 }
+		 });
+	 }
 	 
-	 
+	 private void setManualOverride(RoutingContext routingContext) {
+		 JsonObject body = routingContext.body().asJsonObject();
+		 Integer idGroup = Integer.valueOf(body.getString("idGroup"));
+		 Boolean manualOverride = body.getBoolean("manualOverride");
+		 
+		 mySqlClient.getConnection(connection -> {
+				if(connection.succeeded()) {
+					
+					connection.result().preparedQuery("UPDATE grupoYUsuarios SET manualOverride = ? WHERE idGroup = ?;")
+					.execute(Tuple.of(manualOverride, idGroup), resultado -> {
+						if(resultado.succeeded()) {
+							routingContext.response().setStatusCode(201).end("Estado actualizado correctamente");
+						}else {
+							routingContext.response().setStatusCode(500).end("Database error: " + resultado.cause().getMessage());
+						}
+					});
+					connection.result().close();// Importante cerrar siempre la conexion
+
+				}else {
+					routingContext.response().setStatusCode(500).end("Connection error: " + connection.cause().getMessage());
+				}
+			});
+	 }
 	 
 	
 	// Funciones de la API con BBDD
@@ -774,8 +886,19 @@ public class RestServer extends AbstractVerticle {
 						if(relesList.stream().filter(x -> x.getTipo().equals("Bombilla")).toList().isEmpty()) luces = null;
 						
 					}
-					connection.result().close();
 				});
+				
+				
+				connection.result().preparedQuery("SELECT manualOverride FROM domoticadad.grupoYUsuarios WHERE idGroup = ?").execute(Tuple.of(idGrupo), res -> {
+					if(res.result().size()!=0) {
+						manualOverride = res.result().iterator().next().getBoolean("manualOverride");
+					}else {
+						// Si nadie ha registrado el grupo, el Control manual no se aplica:
+						manualOverride = false;
+					}
+				});
+				
+				
 				
 				connection.result()
 				.preparedQuery("INSERT INTO domoticadad.sLuz (idSLuz, valor, tStamp, idPlaca, idGroup) "
@@ -789,7 +912,7 @@ public class RestServer extends AbstractVerticle {
 								// Esto es para que si estamos en la "frontera", no se enciendan y apaguen constantemente los actuadores
 								
 								//
-								if(luces != null) {
+								if(luces != null && !manualOverride) {
 									if(valor<1400.0 && luces) {
 										// Enciende
 										// 1º Comprueba si la luminosidad es baja y si hay alguna bombilla apagada
@@ -808,8 +931,9 @@ public class RestServer extends AbstractVerticle {
 							}else {
 								routingContext.response().setStatusCode(500).end("Database error: " + res.cause().getMessage());
 							}
-						connection.result().close();	
+							
 						});
+				connection.result().close();
 			}else {
 				routingContext.response().setStatusCode(500).end("Connection error: " + connection.cause().getMessage());
 			}
@@ -935,7 +1059,6 @@ public class RestServer extends AbstractVerticle {
 			if(connection.succeeded()) {
 				
 				Integer idGroup = Integer.valueOf(routingContext.request().getParam("idGroup"));
-				System.out.println("Aquí el grupo: " + idGroup);
 				connection.result()
 				.preparedQuery("SELECT r1.*"
 						+ " FROM domoticadad.sTemp r1 "
@@ -1019,7 +1142,16 @@ public class RestServer extends AbstractVerticle {
 						ventiladores = relesList.stream().filter(x -> x.getTipo().equals("Ventilador")).map(x -> x.getEstado()).anyMatch(x -> x==false);
 						if(relesList.stream().filter(x -> x.getTipo().equals("Ventilador")).toList().isEmpty()) ventiladores = null;
 					}
-					connection.result().close();
+				});
+				
+				connection.result().preparedQuery("SELECT manualOverride FROM domoticadad.grupoYUsuarios WHERE idGroup = ?").execute(Tuple.of(idGrupo), res -> {
+					if(res.result().size()!=0) {
+						manualOverride = res.result().iterator().next().getBoolean("manualOverride");
+						System.out.println("Ventiladores: " + manualOverride);
+					}else {
+						// Si nadie ha registrado el grupo, el Control manual no se aplica:
+						manualOverride = false;
+					}
 				});
 				
 				connection.result()
@@ -1029,7 +1161,7 @@ public class RestServer extends AbstractVerticle {
 							if(res.succeeded()) {
 								routingContext.response().setStatusCode(201).end("SensorTemp añadido correctamente");
 								// Mismo procedimiento que con los sensores de Luz
-								if(ventiladores!=null) {
+								if(ventiladores!=null && !manualOverride) {
 									// Si es nulo, la inicialización ha debido ir mal, por lo que con reiniciar el dispositivo físico
 									// debería solucionarse eventualmente, ya que las placas publican un primer POST de cada actuador siempre
 									if(valor>30.0 && ventiladores) {
@@ -1045,9 +1177,11 @@ public class RestServer extends AbstractVerticle {
 							}else {
 								routingContext.response().setStatusCode(500).end("Database error: " + res.cause().getMessage());
 							}
-						connection.result().close();	
+							
 						});
+				connection.result().close();
 			}else {
+				connection.result().close();
 				routingContext.response().setStatusCode(500).end("Connection error: " + connection.cause().getMessage());
 			}
 		});
