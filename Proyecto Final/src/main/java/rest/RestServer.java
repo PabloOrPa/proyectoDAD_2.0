@@ -178,7 +178,6 @@ public class RestServer extends AbstractVerticle {
 		 String tipo = body.getString("tipo");
 		 Boolean estado = Boolean.valueOf(body.getString("estado"));
 		 
-		 System.out.println("Set rele activado");
 		 mySqlClient.getConnection(connection -> {
 				if(connection.succeeded()) {
 					
@@ -1147,7 +1146,6 @@ public class RestServer extends AbstractVerticle {
 				connection.result().preparedQuery("SELECT manualOverride FROM domoticadad.grupoYUsuarios WHERE idGroup = ?").execute(Tuple.of(idGrupo), res -> {
 					if(res.result().size()!=0) {
 						manualOverride = res.result().iterator().next().getBoolean("manualOverride");
-						System.out.println("Ventiladores: " + manualOverride);
 					}else {
 						// Si nadie ha registrado el grupo, el Control manual no se aplica:
 						manualOverride = false;
