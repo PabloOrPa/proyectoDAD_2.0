@@ -181,7 +181,7 @@ function asCardRele(rele) {
         if (rele.estado == true) {
             imagenUrl = "./images/BombillaON.png";
         } else if (rele.estado == false) {
-            imagenUrl = "./images/BombillaOFF.jpg";
+            imagenUrl = "./images/BombillaOFF.png";
         }
     } else if (rele.tipo == "Ventilador") {
         if (rele.estado == true) {
@@ -198,7 +198,7 @@ function asCardRele(rele) {
             <img src="${imagenUrl}" class="card-img-top" style="max-width:200px; max-height:200px; margin-left:25%">
 
             <div class="card-body">
-                <h5 class="card-title text-center">Sensor: ${rele.idRele}</h5>
+                <h5 class="card-title text-center">Actuador: ${rele.idRele}</h5>
                 <p class="card-text">Placa: ${rele.idPlaca}</p>
             </div>
 
